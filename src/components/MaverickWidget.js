@@ -4,7 +4,7 @@ import speechRecognitionService from '../services/SpeechRecognitionService';
 
 // Configuration
 const GEMINI_API_KEY = 'AIzaSyC9g4oPDCChk2KLGrhrYWZfxTl5SVqSoAk'; // Replace with env variable in production
-const WEBSITE_URL = 'https://voxa-assist.vercel.app/';  // The website to crawl
+const WEBSITE_URL = 'https://voxa-assist.vercel.app/'; // The website to crawl
 
 const MaverickWidget = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -27,9 +27,7 @@ const MaverickWidget = () => {
   const fetchWebsiteContent = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${WEBSITE_URL}`, {
-        headers: { "X-Requested-With": "XMLHttpRequest" },
-      });
+      const res = await fetch(`${WEBSITE_URL}`)
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const html = await res.text();
       const text = extractTextFromHTML(html);

@@ -27,7 +27,7 @@ const MaverickWidget = () => {
   const fetchWebsiteContent = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`https://cors-anywhere.herokuapp.com/${WEBSITE_URL}`, {
+      const res = await fetch(`${WEBSITE_URL}`, {
         headers: { "X-Requested-With": "XMLHttpRequest" },
       });
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);

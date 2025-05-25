@@ -5,6 +5,7 @@ import About from './pages/About';
 import Contact from './pages/Contact';
 import VoiceNavigator from './components/VoiceNavigator';
 import MaverickWidget from './components/MaverickWidget';
+import SiteContent from './components/SiteContent';
 import './App.css'; // Make sure to create this file
 
 function App() {
@@ -59,6 +60,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
+            <Route path="/site-content" element={<SiteContent />} />
         </Routes>
       </main>
       

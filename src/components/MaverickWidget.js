@@ -4,7 +4,7 @@ import speechRecognitionService from '../services/SpeechRecognitionService';
 
 // Configuration
 const GEMINI_API_KEY = 'AIzaSyC9g4oPDCChk2KLGrhrYWZfxTl5SVqSoAk'; // Replace with env variable in production
-const WEBSITE_URL = 'https://maverickedits.vercel.app/'; // The website to crawl
+const WEBSITE_URL = 'https://voxa-assist.vercel.app/';  // The website to crawl
 
 const MaverickWidget = () => {
   const [isOpen, setIsOpen] = useState(false);

@@ -4,7 +4,7 @@ import speechRecognitionService from '../services/SpeechRecognitionService';
 
 // Configuration
 const GEMINI_API_KEY = 'AIzaSyC9g4oPDCChk2KLGrhrYWZfxTl5SVqSoAk'; // Replace with env variable in production
-const WEBSITE_URL = 'https://voxa-assist.vercel.app/'; // The website to crawl
+const BACKEND_URL = 'http://localhost:5000'; // Your backend server URL
 
 const MaverickWidget = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -16,35 +16,16 @@ const MaverickWidget = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [websiteContent, setWebsiteContent] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechEnabled, setSpeechEnabled] = useState(true);
 
   const chatRef = useRef(null);
   const synthesizer = useRef(window.speechSynthesis);
   const isProcessingVoiceRef = useRef(false);
   const processedTranscripts = useRef(new Set());
+  const currentUtterance = useRef(null);
 
-  // Fetch website content on component mount
-  useEffect(() => {
-  const fetchWebsiteContent = async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(`${WEBSITE_URL}`)
-      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-      const html = await res.text();
-      const text = extractTextFromHTML(html);
-      setWebsiteContent(text);
-    } catch (err) {
-      console.error("Failed to load website content:", err);
-      setWebsiteContent(
-        "Failed to load website content. Please try again later."
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  fetchWebsiteContent();
-}, []);
-
-  // Basic HTML to text extraction
+  // Enhanced HTML to text extraction
   const extractTextFromHTML = (html) => {
     // Create a DOM parser
     const parser = new DOMParser();
@@ -62,43 +43,209 @@ const MaverickWidget = () => {
       styles[i].parentNode.removeChild(styles[i]);
     }
     
-    // Get text from important sections (customize as needed)
+    // Get text from important sections
     const title = doc.querySelector('title')?.textContent || '';
     const metaDescription = doc.querySelector('meta[name="description"]')?.getAttribute('content') || '';
-    const mainContent = doc.querySelector('main')?.textContent || '';
+    
+    // Get all text content from body
     const bodyContent = doc.querySelector('body')?.textContent || '';
     
-    // Combine and clean the content
+    // Clean up whitespace and combine content
     let content = `Title: ${title}\nDescription: ${metaDescription}\n\n`;
-    content += mainContent || bodyContent;
+    content += bodyContent.replace(/\s+/g, ' ').trim();
     
-    // Clean up whitespace and return
-    return content.replace(/\s+/g, ' ').trim();
+    // Extract contact information specifically
+    const phoneRegex = /(?:\+91\s*)?(?:\d{5}\s*\d{5}|\d{10})/g;
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    
+    const phones = content.match(phoneRegex) || [];
+    const emails = content.match(emailRegex) || [];
+    
+    // Add extracted contact info to ensure it's available
+    if (phones.length > 0) {
+      content += `\n\nContact Phone Numbers: ${phones.join(', ')}`;
+    }
+    if (emails.length > 0) {
+      content += `\nContact Emails: ${emails.join(', ')}`;
+    }
+    
+    console.log('📞 Extracted phones:', phones);
+    console.log('📧 Extracted emails:', emails);
+    
+    return content;
   };
 
-  // Speak Text Function
-  const speakResponse = useCallback((text) => {
-    if (!synthesizer.current || !text) return;
+  // Fetch website content from backend
+  useEffect(() => {
+    const fetchWebsiteContent = async () => {
+      setIsLoading(true);
+      try {
+        console.log('🚀 Fetching website content from backend...');
+        
+        const response = await fetch(`${BACKEND_URL}/crawl`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: '' // Empty URL to crawl all default paths
+          })
+        });
 
-    const voices = synthesizer.current.getVoices();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9;
-    utterance.pitch = 1.1;
+        if (!response.ok) {
+          throw new Error(`Backend responded with status: ${response.status}`);
+        }
 
-    // Prefer a Google voice if available
-    const preferred = voices.find(v => v.name.includes('Google'));
-    if (preferred) utterance.voice = preferred;
+        const data = await response.json();
+        console.log('📡 Backend response received:', data);
 
-    synthesizer.current.speak(utterance);
+        if (data.combinedContent) {
+          // Extract text from the combined HTML content
+          const extractedText = extractTextFromHTML(data.combinedContent);
+          setWebsiteContent(extractedText);
+          console.log('✅ Website content extracted and set successfully');
+          console.log('Content preview:', extractedText.substring(0, 500) + '...');
+        } else if (data.crawledPages && data.crawledPages.length > 0) {
+          // Fallback: combine content from individual pages
+          let combinedText = '';
+          data.crawledPages.forEach(page => {
+            if (page.content) {
+              combinedText += `\n\n=== Content from ${page.url} ===\n`;
+              combinedText += extractTextFromHTML(page.content);
+            } else if (page.error) {
+              console.warn(`⚠️ Error crawling ${page.url}:`, page.error);
+            }
+          });
+          
+          if (combinedText.trim()) {
+            setWebsiteContent(combinedText);
+            console.log('✅ Website content combined from individual pages');
+          } else {
+            throw new Error('No content could be extracted from crawled pages');
+          }
+        } else {
+          throw new Error('No content received from backend');
+        }
+        
+      } catch (err) {
+        console.error("❌ Failed to load website content from backend:", err);
+        setWebsiteContent(
+          `Failed to load website content from backend: ${err.message}. Please ensure your backend server is running at ${BACKEND_URL}`
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchWebsiteContent();
   }, []);
 
-  // Fetch Gemini Response
+  // Enhanced Speak Text Function with better error handling and voice selection
+  const speakResponse = useCallback((text) => {
+    if (!speechEnabled || !text || !synthesizer.current) {
+      console.log('Speech disabled or no text/synthesizer available');
+      return;
+    }
+
+    // Stop any current speech
+    if (currentUtterance.current) {
+      synthesizer.current.cancel();
+    }
+
+    try {
+      // Clean the text for better speech
+      const cleanText = text
+        .replace(/[*#_`]/g, '') // Remove markdown characters
+        .replace(/\n+/g, '. ') // Replace newlines with periods
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .trim();
+
+      if (!cleanText) return;
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      currentUtterance.current = utterance;
+
+      // Speech settings
+      utterance.rate = 0.9;
+      utterance.pitch = 1.0;
+      utterance.volume = 0.8;
+
+      // Get available voices and prefer a natural English voice
+      const voices = synthesizer.current.getVoices();
+      
+      // Priority order for voice selection
+      const preferredVoices = [
+        'Google UK English Female',
+        'Google US English Female',
+        'Microsoft Zira Desktop',
+        'Microsoft Hazel Desktop',
+        'Google UK English Male',
+        'Google US English Male'
+      ];
+
+      let selectedVoice = null;
+      
+      // Try to find a preferred voice
+      for (const voiceName of preferredVoices) {
+        selectedVoice = voices.find(v => v.name.includes(voiceName.split(' ')[1]) && v.lang.startsWith('en'));
+        if (selectedVoice) break;
+      }
+
+      // Fallback to any English voice
+      if (!selectedVoice) {
+        selectedVoice = voices.find(v => v.lang.startsWith('en'));
+      }
+
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
+        console.log('🗣️ Using voice:', selectedVoice.name);
+      }
+
+      // Event handlers
+      utterance.onstart = () => {
+        setIsSpeaking(true);
+        console.log('🗣️ Started speaking:', cleanText.substring(0, 50) + '...');
+      };
+
+      utterance.onend = () => {
+        setIsSpeaking(false);
+        currentUtterance.current = null;
+        console.log('🔇 Finished speaking');
+      };
+
+      utterance.onerror = (event) => {
+        setIsSpeaking(false);
+        currentUtterance.current = null;
+        console.error('🚫 Speech error:', event.error);
+      };
+
+      // Speak the text
+      synthesizer.current.speak(utterance);
+      
+    } catch (error) {
+      console.error('🚫 Error in speakResponse:', error);
+      setIsSpeaking(false);
+      currentUtterance.current = null;
+    }
+  }, [speechEnabled]);
+
+  // Function to stop speech
+  const stopSpeech = useCallback(() => {
+    if (synthesizer.current && isSpeaking) {
+      synthesizer.current.cancel();
+      setIsSpeaking(false);
+      currentUtterance.current = null;
+      console.log('🔇 Speech stopped by user');
+    }
+  }, [isSpeaking]);
+
+  // Enhanced Gemini Response with better context handling
   const getAIResponse = useCallback(async (message) => {
     try {
       // If API key is not set, return mock response
       if (GEMINI_API_KEY === 'YOUR_API_KEY') {
         console.log("Using mock response (API key not configured)");
-        return `I understand you asked about "${message}" in relation to the website i gave. As a demo, I'm providing this mock response since the API key isn't configured.`;
+        return `I understand you asked about "${message}" in relation to the website. As a demo, I'm providing this mock response since the API key isn't configured.`;
       }
       
       // If website content isn't loaded yet, inform the user
@@ -106,23 +253,20 @@ const MaverickWidget = () => {
         return "I'm still loading information about the website. Please try again in a moment.";
       }
       
-      // Prepare the context with website content
-      const context = websiteContent || "The website i provided is a domain used for illustrative examples in documents.";
+      // Check if content loading failed
+      if (websiteContent && websiteContent.includes('Failed to load website content')) {
+        return "I'm having trouble accessing the website information right now. Please make sure the backend server is running and try again.";
+      }
       
-      // Form the prompt with context and instruction to only answer based on the website
-      const prompt = `
-        I want you to act as an AI assistant that only answers questions about the website i provided.
-        
-        Here is the content from the website:
-        "${context}"
-        
-        Based ONLY on the above content, answer the following question:
-        "${message}"
-        
-        If the question cannot be answered using the provided content, say: "I don't have that Information, you can ask other than that."
-        
-        Keep your response friendly, professional, and within 3-4 lines. Don't mention that you're using specific content unless directly asked.
-      `;
+      // Prepare the context with website content
+      const context = websiteContent || "The website content is not available at the moment.";
+      
+      // Simple and direct prompt
+      const prompt = `Based on this VOXA ASSIST website information: ${context}
+
+Question: ${message}
+
+Give a brief, direct answer based only on the website content provided. If you can't find the specific information in the content, say so clearly.`;
       
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -140,10 +284,17 @@ const MaverickWidget = () => {
       );
 
       const data = await response.json();
-      return data?.candidates?.[0]?.content?.parts?.[0]?.text || "I don't have enough information to answer that about the website i provided.";
+      
+      if (!response.ok) {
+        console.error('Gemini API error:', data);
+        return "I'm having trouble accessing my knowledge base right now. Please try again in a moment.";
+      }
+      
+      return data?.candidates?.[0]?.content?.parts?.[0]?.text || "I don't have enough information to answer that question.";
+      
     } catch (error) {
       console.error("Error getting AI response:", error);
-      return "I'm having trouble connecting to my knowledge base about the website i provided right now. Could you try again?";
+      return "I'm having trouble connecting to my knowledge base right now. Could you try again?";
     }
   }, [websiteContent, isLoading]);
 
@@ -151,6 +302,11 @@ const MaverickWidget = () => {
   const sendMessage = useCallback(async (message) => {
     const userText = message || inputText.trim();
     if (!userText) return;
+
+    // Stop any current speech before processing new message
+    if (isSpeaking) {
+      stopSpeech();
+    }
 
     // Update UI with user message
     setMessages(prev => [...prev, { from: 'user', text: userText }]);
@@ -172,18 +328,20 @@ const MaverickWidget = () => {
       )
     );
 
-    // Speak the response
-    speakResponse(response);
+    // Speak the response after a short delay to ensure UI is updated
+    setTimeout(() => {
+      speakResponse(response);
+    }, 100);
 
     // Scroll to bottom
     setTimeout(() => {
       if (chatRef.current) {
         chatRef.current.scrollTop = chatRef.current.scrollHeight;
       }
-    }, 100);
+    }, 200);
     
     return response;
-  }, [inputText, getAIResponse, speakResponse]);
+  }, [inputText, getAIResponse, speakResponse, isSpeaking, stopSpeech]);
 
   // Reset voice processing state
   const resetVoiceProcessing = useCallback(() => {
@@ -210,10 +368,15 @@ const MaverickWidget = () => {
       return;
     }
     
-    // Check if this is likely a chat command rather than navigation
+    // Enhanced check for chat commands - made more inclusive
     const talkingToMaverick = 
-      trimmedTranscript.toLowerCase().includes('VOXA ASSIST') || 
-      trimmedTranscript.toLowerCase().includes('example') || 
+      trimmedTranscript.toLowerCase().includes('voxa') || 
+      trimmedTranscript.toLowerCase().includes('assist') || 
+      trimmedTranscript.toLowerCase().includes('phone') ||
+      trimmedTranscript.toLowerCase().includes('contact') ||
+      trimmedTranscript.toLowerCase().includes('email') ||
+      trimmedTranscript.toLowerCase().includes('number') ||
+      trimmedTranscript.toLowerCase().includes('service') ||
       trimmedTranscript.toLowerCase().includes('website') ||
       trimmedTranscript.toLowerCase().startsWith('what') || 
       trimmedTranscript.toLowerCase().startsWith('how') || 
@@ -224,6 +387,13 @@ const MaverickWidget = () => {
       trimmedTranscript.toLowerCase().startsWith('who') ||
       trimmedTranscript.toLowerCase().startsWith('when') ||
       trimmedTranscript.toLowerCase().startsWith('where') ||
+      trimmedTranscript.toLowerCase().startsWith('is') ||
+      trimmedTranscript.toLowerCase().startsWith('who') ||
+      trimmedTranscript.toLowerCase().startsWith('hi') ||
+      trimmedTranscript.toLowerCase().startsWith('hello') ||
+      trimmedTranscript.toLowerCase().startsWith('please') ||
+      trimmedTranscript.toLowerCase().startsWith('show') ||
+      trimmedTranscript.toLowerCase().startsWith('give') ||
       trimmedTranscript.toLowerCase().startsWith('tell me');
     
     if (talkingToMaverick) {
@@ -293,6 +463,25 @@ const MaverickWidget = () => {
     }
   }, [messages]);
 
+  // Initialize voices when component mounts
+  useEffect(() => {
+    // Load voices if not already loaded
+    if (synthesizer.current && synthesizer.current.getVoices().length === 0) {
+      synthesizer.current.addEventListener('voiceschanged', () => {
+        console.log('🗣️ Voices loaded:', synthesizer.current.getVoices().length);
+      });
+    }
+  }, []);
+
+  // Cleanup speech on unmount
+  useEffect(() => {
+    return () => {
+      if (synthesizer.current && currentUtterance.current) {
+        synthesizer.current.cancel();
+      }
+    };
+  }, []);
+
   return (
     <div className={`maverick-widget ${isDarkMode ? 'dark' : ''}`}>
       <button className="maverick-toggle" onClick={() => setIsOpen(!isOpen)}>
@@ -304,22 +493,46 @@ const MaverickWidget = () => {
           <div className="chat-header">
             <span>VOXA ASSIST</span>
             <div>
-              <button onClick={() => setIsDarkMode(!isDarkMode)} className="theme-btn">
-                <i className={`fas ${isDarkMode ? 'fa-sun' : 'fa-moon'}`} />
+              <button 
+                onClick={() => setSpeechEnabled(!speechEnabled)} 
+                className={`speech-toggle-btn ${speechEnabled ? 'enabled' : 'disabled'}`}
+                title={speechEnabled ? 'Disable Speech' : 'Enable Speech'}
+              >
+                <i className={`fas ${speechEnabled ? 'fa-volume-up' : 'fa-volume-mute'}`} />
               </button>
+              {isSpeaking && (
+                <button 
+                  onClick={stopSpeech} 
+                  className="stop-speech-btn"
+                  title="Stop Speaking"
+                >
+                  <i className="fas fa-stop" />
+                </button>
+              )}
+            
               <button onClick={() => setIsOpen(false)} className="close-btn">×</button>
             </div>
           </div>
 
           <div className="chat-messages" ref={chatRef}>
-            {isLoading && websiteContent === null && (
-              <div className="system-message">Loading website content...</div>
-              
+            {isLoading && (
+              <div className="system-message">
+                <i className="fas fa-spinner fa-spin"></i> Loading website content from backend...
+              </div>
             )}
             
             {messages.map((msg, index) => (
               <div key={msg.id || index} className={`message ${msg.from === 'user' ? 'user-message' : 'bot-message'} ${msg.loading ? 'loading' : ''}`}>
                 {msg.text}
+                {msg.from === 'bot' && !msg.loading && speechEnabled && (
+                  <button 
+                    onClick={() => speakResponse(msg.text)} 
+                    className="speak-btn"
+                    title="Speak this message"
+                  >
+                    <i className="fas fa-volume-up" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -327,17 +540,21 @@ const MaverickWidget = () => {
           <div className="chat-input">
             <input
               type="text"
-              placeholder="Ask about example.com..."
+              placeholder="Ask about VOXA ASSIST services..."
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+              disabled={isLoading}
             />
-            <button onClick={() => sendMessage()}>Send</button>
+            <button onClick={() => sendMessage()} disabled={isLoading}>
+              {isLoading ? <i className="fas fa-spinner fa-spin"></i> : 'Send'}
+            </button>
           </div>
 
           <div className={`voice-status ${voiceStatus}`}>
             <i className={`fas ${voiceStatus === 'listening' ? 'fa-microphone-alt' : 'fa-microphone'}`}></i>
             {voiceStatus === 'listening' ? "Listening..." : "Voice Ready"} 
+            {isSpeaking && <span className="speaking-indicator"> | Speaking...</span>}
           </div>
         </div>
       )}

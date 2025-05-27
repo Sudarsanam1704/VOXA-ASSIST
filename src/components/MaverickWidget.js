@@ -4,7 +4,7 @@ import speechRecognitionService from '../services/SpeechRecognitionService';
 
 // Configuration
 const GEMINI_API_KEY = 'AIzaSyC9g4oPDCChk2KLGrhrYWZfxTl5SVqSoAk'; // Replace with env variable in production
-const BACKEND_URL = 'http://localhost:5000'; // Your backend server URL
+const BACKEND_URL = 'https://voxa-assist-backend.vercel.app/'; // Your backend server URL
 
 const MaverickWidget = () => {
   const [isOpen, setIsOpen] = useState(false);

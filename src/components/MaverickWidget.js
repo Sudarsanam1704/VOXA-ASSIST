@@ -82,7 +82,7 @@ const MaverickWidget = () => {
       try {
         console.log('🚀 Fetching website content from backend...');
         
-        const response = await fetch(`${BACKEND_URL}/crawl`, {
+        const response = await fetch(`${BACKEND_URL}crawl`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
